@@ -41,6 +41,7 @@ import {
 import {
   AnnotationStorage,
   PrintAnnotationStorage,
+  SerializableEmpty,
 } from "./annotation_storage.js";
 import {
   deprecated,
@@ -548,10 +549,9 @@ function getDataProp(val) {
     typeof Buffer !== "undefined" && // eslint-disable-line no-undef
     val instanceof Buffer // eslint-disable-line no-undef
   ) {
-    deprecated(
+    throw new Error(
       "Please provide binary data as `Uint8Array`, rather than `Buffer`."
     );
-    return new Uint8Array(val);
   }
   if (val instanceof Uint8Array && val.byteLength === val.buffer.byteLength) {
     // Use the data as-is when it's already a Uint8Array that completely
@@ -1382,6 +1382,13 @@ class PDFPageProxy {
   }
 
   /**
+   * @type {Object} The filter factory instance.
+   */
+  get filterFactory() {
+    return this._transport.filterFactory;
+  }
+
+  /**
    * @type {boolean} True if only XFA form.
    */
   get isPureXfa() {
@@ -1417,16 +1424,6 @@ class PDFPageProxy {
     pageColors = null,
     printAnnotationStorage = null,
   }) {
-    if (
-      (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) &&
-      arguments[0]?.canvasFactory
-    ) {
-      throw new Error(
-        "render no longer accepts the `canvasFactory`-option, " +
-          "please pass it to the `getDocument`-function instead."
-      );
-    }
-
     this._stats?.time("Overall");
 
     const intentArgs = this._transport.getRenderingIntent(
@@ -1804,13 +1801,18 @@ class PDFPageProxy {
   /**
    * @private
    */
-  _pumpOperatorList({ renderingIntent, cacheKey, annotationStorageMap }) {
+  _pumpOperatorList({
+    renderingIntent,
+    cacheKey,
+    annotationStorageSerializable,
+  }) {
     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
       assert(
         Number.isInteger(renderingIntent) && renderingIntent > 0,
         '_pumpOperatorList: Expected valid "renderingIntent" argument.'
       );
     }
+    const { map, transfers } = annotationStorageSerializable;
 
     const readableStream = this._transport.messageHandler.sendWithStream(
       "GetOperatorList",
@@ -1818,8 +1820,9 @@ class PDFPageProxy {
         pageIndex: this._pageIndex,
         intent: renderingIntent,
         cacheKey,
-        annotationStorage: annotationStorageMap,
-      }
+        annotationStorage: map,
+      },
+      transfers
     );
     const reader = readableStream.getReader();
 
@@ -2442,7 +2445,7 @@ class WorkerTransport {
     isOpList = false
   ) {
     let renderingIntent = RenderingIntentFlag.DISPLAY; // Default value.
-    let annotationMap = null;
+    let annotationStorageSerializable = SerializableEmpty;
 
     switch (intent) {
       case "any":
@@ -2475,7 +2478,7 @@ class WorkerTransport {
             ? printAnnotationStorage
             : this.annotationStorage;
 
-        annotationMap = annotationStorage.serializable;
+        annotationStorageSerializable = annotationStorage.serializable;
         break;
       default:
         warn(`getRenderingIntent - invalid annotationMode: ${annotationMode}`);
@@ -2487,10 +2490,8 @@ class WorkerTransport {
 
     return {
       renderingIntent,
-      cacheKey: `${renderingIntent}_${AnnotationStorage.getHash(
-        annotationMap
-      )}`,
-      annotationStorageMap: annotationMap,
+      cacheKey: `${renderingIntent}_${annotationStorageSerializable.hash}`,
+      annotationStorageSerializable,
     };
   }
 
@@ -2898,13 +2899,19 @@ class WorkerTransport {
           "please use the getData-method instead."
       );
     }
+    const { map, transfers } = this.annotationStorage.serializable;
+
     return this.messageHandler
-      .sendWithPromise("SaveDocument", {
-        isPureXfa: !!this._htmlForXfa,
-        numPages: this._numPages,
-        annotationStorage: this.annotationStorage.serializable,
-        filename: this._fullReader?.filename ?? null,
-      })
+      .sendWithPromise(
+        "SaveDocument",
+        {
+          isPureXfa: !!this._htmlForXfa,
+          numPages: this._numPages,
+          annotationStorage: map,
+          filename: this._fullReader?.filename ?? null,
+        },
+        transfers
+      )
       .finally(() => {
         this.annotationStorage.resetModified();
       });
