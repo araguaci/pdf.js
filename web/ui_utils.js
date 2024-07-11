@@ -155,7 +155,7 @@ function scrollIntoView(element, spot, scrollMatches = false) {
  * Helper function to start monitoring the scroll event and converting them into
  * PDF.js friendly one: with scroll debounce and scroll direction.
  */
-function watchScroll(viewAreaElement, callback) {
+function watchScroll(viewAreaElement, callback, abortSignal = undefined) {
   const debounceScroll = function (evt) {
     if (rAF) {
       return;
@@ -189,13 +189,21 @@ function watchScroll(viewAreaElement, callback) {
   };
 
   let rAF = null;
-  viewAreaElement.addEventListener("scroll", debounceScroll, true);
+  viewAreaElement.addEventListener("scroll", debounceScroll, {
+    useCapture: true,
+    signal: abortSignal,
+  });
+  abortSignal?.addEventListener(
+    "abort",
+    () => window.cancelAnimationFrame(rAF),
+    { once: true }
+  );
   return state;
 }
 
 /**
  * Helper function to parse query string (e.g. ?param1=value&param2=...).
- * @param {string}
+ * @param {string} query
  * @returns {Map}
  */
 function parseQueryString(query) {
@@ -206,19 +214,18 @@ function parseQueryString(query) {
   return params;
 }
 
-const InvisibleCharactersRegExp = /[\x01-\x1F]/g;
+const InvisibleCharsRegExp = /[\x00-\x1F]/g;
 
 /**
  * @param {string} str
  * @param {boolean} [replaceInvisible]
  */
 function removeNullCharacters(str, replaceInvisible = false) {
-  if (typeof str !== "string") {
-    console.error(`The argument must be a string.`);
+  if (!InvisibleCharsRegExp.test(str)) {
     return str;
   }
   if (replaceInvisible) {
-    str = str.replaceAll(InvisibleCharactersRegExp, " ");
+    return str.replaceAll(InvisibleCharsRegExp, m => (m === "\x00" ? "" : " "));
   }
   return str.replaceAll("\x00", "");
 }
@@ -261,6 +268,7 @@ function binarySearchFirstItem(items, condition, start = 0) {
  *  @param {number} x - Positive float number.
  *  @returns {Array} Estimated fraction: the first array item is a numerator,
  *                   the second one is a denominator.
+ *                   They are both natural numbers.
  */
 function approximateFraction(x) {
   // Fast paths for int numbers or their inversions.
@@ -307,9 +315,12 @@ function approximateFraction(x) {
   return result;
 }
 
-function roundToDivide(x, div) {
-  const r = x % div;
-  return r === 0 ? x : Math.round(x - r + div);
+/**
+ * @param {number} x - A positive number to round to a multiple of `div`.
+ * @param {number} div - A natural number.
+ */
+function floorToDivide(x, div) {
+  return x - (x % div);
 }
 
 /**
@@ -461,7 +472,7 @@ function backtrackBeforeAllVisibleElements(index, views, top) {
  * rendering canvas. Earlier and later refer to index in `views`, not page
  * layout.)
  *
- * @param {GetVisibleElementsParameters}
+ * @param {GetVisibleElementsParameters} params
  * @returns {Object} `{ first, last, views: [{ id, x, y, view, percent }] }`
  */
 function getVisibleElements({
@@ -602,13 +613,6 @@ function getVisibleElements({
     });
   }
   return { first, last, views: visible, ids };
-}
-
-/**
- * Event handler to suppress context menu.
- */
-function noContextMenuHandler(evt) {
-  evt.preventDefault();
 }
 
 function normalizeWheelEventDirection(evt) {
@@ -791,7 +795,7 @@ function getActiveOrFocusedElement() {
 
 /**
  * Converts API PageLayout values to the format used by `BaseViewer`.
- * @param {string} mode - The API PageLayout value.
+ * @param {string} layout - The API PageLayout value.
  * @returns {Object}
  */
 function apiPageLayoutToViewerModes(layout) {
@@ -871,6 +875,7 @@ export {
   DEFAULT_SCALE_DELTA,
   DEFAULT_SCALE_VALUE,
   docStyle,
+  floorToDivide,
   getActiveOrFocusedElement,
   getPageSizeInches,
   getVisibleElements,
@@ -881,7 +886,6 @@ export {
   MAX_AUTO_SCALE,
   MAX_SCALE,
   MIN_SCALE,
-  noContextMenuHandler,
   normalizeWheelEventDelta,
   normalizeWheelEventDirection,
   OutputScale,
@@ -890,7 +894,6 @@ export {
   ProgressBar,
   removeNullCharacters,
   RenderingStates,
-  roundToDivide,
   SCROLLBAR_PADDING,
   scrollIntoView,
   ScrollMode,

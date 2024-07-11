@@ -140,18 +140,31 @@ class AForm {
     return date;
   }
 
-  _parseDate(cFormat, cDate) {
+  _parseDate(cFormat, cDate, strict = false) {
     let date = null;
     try {
       date = this._util.scand(cFormat, cDate);
     } catch {}
     if (!date) {
-      date = Date.parse(cDate);
-      if (isNaN(date)) {
-        date = this._tryToGuessDate(cFormat, cDate);
-      } else {
-        date = new Date(date);
+      if (strict) {
+        return null;
       }
+      let format = cFormat;
+      if (/mm(?!m)/.test(format)) {
+        format = format.replace("mm", "m");
+      }
+      if (/dd(?!d)/.test(format)) {
+        format = format.replace("dd", "d");
+      }
+      try {
+        date = this._util.scand(format, cDate);
+      } catch {}
+    }
+    if (!date) {
+      date = Date.parse(cDate);
+      date = isNaN(date)
+        ? this._tryToGuessDate(cFormat, cDate)
+        : new Date(date);
     }
     return date;
   }
@@ -222,10 +235,6 @@ class AForm {
     bCurrencyPrepend
   ) {
     const event = globalThis.event;
-    if (!event.value) {
-      return;
-    }
-
     let value = this.AFMakeNumber(event.value);
     if (value === null) {
       event.value = "";
@@ -348,11 +357,7 @@ class AForm {
     const formatStr = `%,${sepStyle}.${nDec}f`;
     value = this._util.printf(formatStr, value * 100);
 
-    if (percentPrepend) {
-      event.value = `%${value}`;
-    } else {
-      event.value = `${value}%`;
-    }
+    event.value = percentPrepend ? `%${value}` : `${value}%`;
   }
 
   AFPercent_Keystroke(nDec, sepStyle) {
@@ -389,7 +394,7 @@ class AForm {
       return;
     }
 
-    if (this._parseDate(cFormat, value) === null) {
+    if (this._parseDate(cFormat, value, /* strict = */ true) === null) {
       const invalid = GlobalConstants.IDS_INVALID_DATE;
       const invalid2 = GlobalConstants.IDS_INVALID_DATE2;
       const err = `${invalid} ${this._mkTargetName(
@@ -541,11 +546,10 @@ class AForm {
         formatStr = "99999-9999";
         break;
       case 2:
-        if (this._util.printx("9999999999", event.value).length >= 10) {
-          formatStr = "(999) 999-9999";
-        } else {
-          formatStr = "999-9999";
-        }
+        formatStr =
+          this._util.printx("9999999999", event.value).length >= 10
+            ? "(999) 999-9999"
+            : "999-9999";
         break;
       case 3:
         formatStr = "999-99-9999";
@@ -648,11 +652,10 @@ class AForm {
         break;
       case 2:
         const value = this.AFMergeChange(event);
-        if (value.length > 8 || value.startsWith("(")) {
-          formatStr = "(999) 999-9999";
-        } else {
-          formatStr = "999-9999";
-        }
+        formatStr =
+          value.length > 8 || value.startsWith("(")
+            ? "(999) 999-9999"
+            : "999-9999";
         break;
       case 3:
         formatStr = "999-99-9999";
